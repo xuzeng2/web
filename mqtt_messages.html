@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MQTT消息记录</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .message { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
+        .timestamp { color: #666; font-size: 0.9em; }
+        .topic { font-weight: bold; color: #2c3e50; }
+        .content { margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <h1>MQTT消息记录</h1>
+    <div id="messages-container">
+
+        <div class="message">
+            <div class="timestamp">2026-01-16 21:47:49</div>
+            <div class="topic">主题: 864865083061953</div>
+            <div class="content">{
+  "msg": "666"
+}
+</div>
+        </div>
+    
+        <div class="message">
+            <div class="timestamp">2026-01-16 21:47:23</div>
+            <div class="topic">主题: 864865083061953</div>
+            <div class="content">{
+  "msg": "esp32"
+}
+</div>
+        </div>
+            <p>系统启动时间: 2026-01-16 21:46:50</p>
+    </div>
+</body>
+</html>
