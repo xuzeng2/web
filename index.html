@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ESP32-S3 智能电风扇 · 风迹</title>
+<style>
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 20px 16px 40px;
+  margin: 0;
+  color: #eef2f5;
+  background: linear-gradient(-45deg, #2c3e50, #415a77, #1b263b, #0d1b2a);
+  background-size: 400% 400%;
+  animation: gradient 15s ease infinite;
+}
+@keyframes gradient {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+#particleCanvas {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.fan-card {
+  position: relative;
+  z-index: 2;
+  background: rgba(22, 32, 48, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 30px;
+  padding: 20px 16px 24px;
+  box-shadow: 0 30px 40px -15px rgba(0, 0, 0, 0.6),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  width: 100%;
+  max-width: 480px;
+  transition: all 0.3s ease;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+
+  opacity: 0;
+  transform: translateY(48px);
+  animation: cardFloatUp 1.4s cubic-bezier(0.16, 1, 0.3, 1) 0.25s forwards;
+}
+@keyframes cardFloatUp {
+  0%   { opacity: 0; transform: translateY(48px); filter: blur(6px); }
+  100% { opacity: 1; transform: translateY(0);    filter: blur(0); }
+}
+
+.fan-title {
+  text-align: center;
+  font-weight: 500;
+  font-size: 1.28rem;
+  letter-spacing: 1.5px;
+  margin-bottom: 12px;
+  color: #b9d8ff;
+  text-shadow: 0 0 15px rgba(90, 160, 255, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+}
+.fan-title span { font-size: 1.5rem; filter: drop-shadow(0 0 8px #3e8aff); }
+
+.led-bar {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 0.72rem;
+  color: #7a9cc0;
+}
+.led-item { display: flex; align-items: center; gap: 6px; }
+.led {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #1e2b3d;
+  box-shadow: inset 0 1px 2px #000;
+  transition: all 0.2s;
+}
+.led.on-green { background: #4dff9e; box-shadow: 0 0 8px #4dff9e, 0 0 15px #1fbb6a; }
+.led.on-blue  { background: #5fc8ff; box-shadow: 0 0 8px #5fc8ff, 0 0 15px #2580ff; }
+.led.on-orange{ background: #ffb347; box-shadow: 0 0 8px #ffb347, 0 0 15px #ff8c00; }
+.led.on-red   { background: #ff5c5c; box-shadow: 0 0 8px #ff5c5c, 0 0 15px #d63030; }
+.led.on-purple{ background: #c77dff; box-shadow: 0 0 8px #c77dff, 0 0 15px #9b30ff; }
+.led.blink { animation: ledBlink 1s infinite; }
+@keyframes ledBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.fan-visual {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 2px 0 10px;
+}
+
+.blades-container {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  transition: transform 0.3s ease;
+}
+.blades-container.oscillating { animation: swing 3s ease-in-out infinite; }
+@keyframes swing {
+  0%, 100% { transform: rotate(-8deg); }
+  50%      { transform: rotate(8deg); }
+}
+.blades-container.tracking { animation: trackSwing 1.6s ease-in-out infinite; }
+@keyframes trackSwing {
+  0%, 100% { transform: rotate(-12deg); }
+  50%      { transform: rotate(12deg); }
+}
+
+.blades {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #3c4f6b, #1b2535);
+  box-shadow: 0 0 0 8px #1f2b3b,
+              0 20px 35px -5px #00000080,
+              inset 0 0 30px #00000060;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.blade {
+  position: absolute;
+  width: 26%;
+  height: 44%;
+  background: linear-gradient(145deg, #dfe9f5, #a1b7d0);
+  border-radius: 80% 20% 60% 40% / 50% 30% 70% 50%;
+  top: 6%;
+  left: 37%;
+  transform-origin: 50% 100%;
+  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.5), inset 0 -2px 5px #ffffff70;
+  border: 1px solid #c0d2e8;
+  opacity: 0.95;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.blade:nth-child(1) { transform: rotate(0deg); }
+.blade:nth-child(2) { transform: rotate(120deg); }
+.blade:nth-child(3) { transform: rotate(240deg); }
+
+.center-hub {
+  position: absolute;
+  width: 32%; height: 32%;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 40% 40%, #ffffff, #a0b8d4);
+  border-radius: 50%;
+  box-shadow: inset 0 -5px 8px #3b4b5e, 0 5px 15px black;
+  z-index: 10;
+  border: 2px solid #8aa1bb;
+  pointer-events: none;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.camera-scan {
+  position: absolute;
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  border: 2px dashed transparent;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.camera-scan.active {
+  opacity: 1;
+  border-color: rgba(95, 200, 255, 0.6);
+  animation: scanRotate 2s linear infinite;
+  box-shadow: 0 0 20px rgba(95, 200, 255, 0.3);
+}
+@keyframes scanRotate {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.heat-marker {
+  position: absolute;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffb347, #ff5c5c);
+  box-shadow: 0 0 12px #ff5c5c, 0 0 20px #ffb34780;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 0.3s, top 0.45s ease-out, left 0.45s ease-out;
+  pointer-events: none;
+}
+.heat-marker.active { opacity: 1; }
+
+.fan-status {
+  margin: 4px 0 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 100px;
+  padding: 6px 18px;
+  font-size: 1.1rem;
+  letter-spacing: 0.5px;
+  border: 1px solid #2b405b;
+  box-shadow: inset 0 5px 10px #00000030;
+}
+.status-label { color: #96b8e0; display: flex; align-items: center; gap: 8px; }
+.status-label i { font-style: normal; font-size: 1.2rem; }
+.status-value {
+  font-weight: 700; font-size: 1.45rem;
+  color: #8fe0ff; text-shadow: 0 0 10px #2580ff;
+  min-width: 60px; text-align: right;
+}
+
+.section {
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 18px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  border: 1px solid #223247;
+  box-shadow: inset 0 2px 6px #00000030;
+}
+.section-title {
+  font-size: 0.8rem;
+  letter-spacing: 1.2px;
+  color: #7a9cc0;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: uppercase;
+}
+.section-title i { font-style: normal; }
+
+.speed-control { display: flex; flex-direction: column; gap: 10px; }
+.slider-label {
+  display: flex; justify-content: space-between;
+  font-size: 0.9rem; color: #a6c6ee; padding: 0 4px;
+}
+.slider-label span:last-child { font-weight: 600; color: #b3e0ff; }
+
+input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 8px;
+  background: linear-gradient(90deg, #1d3d5c, #4c7db9);
+  border-radius: 20px; outline: none;
+  box-shadow: inset 0 2px 6px #00000060, 0 1px 0 #3e5775;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 26px; height: 26px;
+  background: radial-gradient(circle, #e2f0ff, #89b9f0);
+  border-radius: 50%;
+  box-shadow: 0 4px 12px #000000b3, 0 0 0 2px #b0d4ff, 0 0 15px #4d94ff;
+  cursor: pointer; transition: 0.1s; border: 1px solid white;
+}
+input[type=range]::-webkit-slider-thumb:active {
+  transform: scale(1.15);
+  background: radial-gradient(circle, #ffffff, #5b9bf0);
+}
+input[type=range]::-moz-range-thumb {
+  width: 26px; height: 26px;
+  background: radial-gradient(circle, #e2f0ff, #89b9f0);
+  border-radius: 50%;
+  box-shadow: 0 4px 12px #000000b3, 0 0 0 2px #b0d4ff, 0 0 15px #4d94ff;
+  cursor: pointer; border: 1px solid white;
+}
+
+.preset-row { display: flex; gap: 6px; margin-top: 10px; }
+.preset-btn {
+  flex: 1;
+  background: rgba(30, 45, 70, 0.8);
+  border: 1px solid #365173;
+  border-radius: 14px;
+  padding: 8px 0;
+  font-size: 0.85rem;
+  color: #bcd4f0;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.preset-btn .pct { font-size: 0.7rem; color: #6f8fb5; }
+.preset-btn:active { transform: scale(0.95); }
+.preset-btn.active {
+  background: linear-gradient(145deg, #205c8a, #143a5c);
+  border-color: #4d94ff;
+  color: #e2f0ff;
+  box-shadow: 0 0 12px #2580ff60;
+}
+.preset-btn:disabled { opacity: 0.4; pointer-events: none; }
+
+.option-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+}
+.option-row + .option-row { border-top: 1px solid #1d2c3f; }
+.option-label {
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 0.9rem; color: #c4d9f2;
+}
+.option-label small { font-size: 0.68rem; color: #5f7d9e; }
+
+.switch {
+  position: relative; width: 50px; height: 28px;
+  background: #1a2739; border-radius: 30px;
+  box-shadow: inset 0 2px 5px #00000080, 0 1px 0 #2e425c;
+  cursor: pointer; transition: 0.25s; border: 1px solid #2b3d55;
+  flex-shrink: 0;
+}
+.switch::after {
+  content: ''; position: absolute;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #f0f6ff, #8aa4c4);
+  top: 2px; left: 2px;
+  transition: 0.25s;
+  box-shadow: 0 2px 6px #000000a0;
+}
+.switch.on { background: #1e5b8a; box-shadow: inset 0 2px 5px #00000080, 0 0 12px #2580ff60; border-color: #4d94ff; }
+.switch.on::after { left: 24px; background: radial-gradient(circle at 35% 35%, #ffffff, #5fc8ff); }
+.switch.on.red { background: #8a2020; border-color: #ff5c5c; box-shadow: inset 0 2px 5px #00000080, 0 0 12px #ff5c5c60; }
+.switch.on.red::after { background: radial-gradient(circle at 35% 35%, #ffffff, #ff8a8a); }
+.switch.on.purple { background: #5b1e8a; border-color: #c77dff; box-shadow: inset 0 2px 5px #00000080, 0 0 12px #c77dff60; }
+.switch.on.purple::after { background: radial-gradient(circle at 35% 35%, #ffffff, #d9a6ff); }
+.switch.disabled { opacity: 0.4; pointer-events: none; }
+
+.mode-hint {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 12px;
+  border-left: 3px solid #5fc8ff;
+  font-size: 0.74rem;
+  color: #9fc1e8;
+  line-height: 1.4;
+  min-height: 1.4em;
+  transition: all 0.3s;
+}
+.mode-hint.warn { border-left-color: #ffb347; color: #ffd9a3; }
+.mode-hint.success { border-left-color: #4dff9e; color: #b8ffe0; }
+.mode-hint small { display: block; color: #6f8fb5; margin-top: 3px; }
+
+.timer-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.timer-btn {
+  flex: 1; min-width: 56px;
+  background: rgba(30, 45, 70, 0.8);
+  border: 1px solid #365173;
+  border-radius: 12px;
+  padding: 8px 0;
+  font-size: 0.85rem;
+  color: #bcd4f0;
+  cursor: pointer; transition: all 0.15s;
+}
+.timer-btn:active { transform: scale(0.95); }
+.timer-btn.active {
+  background: linear-gradient(145deg, #8a5a20, #5c3a14);
+  border-color: #ffb347;
+  color: #ffe9c9;
+  box-shadow: 0 0 12px #ffb34760;
+}
+.timer-btn:disabled { opacity: 0.4; pointer-events: none; }
+
+.timer-info {
+  margin-top: 8px; font-size: 0.78rem;
+  color: #ffb347; text-align: center;
+  min-height: 1.2em;
+}
+
+.button-group { display: flex; gap: 10px; margin-top: 14px; }
+.btn {
+  flex: 1;
+  border-radius: 32px;
+  padding: 12px 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  display: flex; justify-content: center; align-items: center; gap: 8px;
+  cursor: pointer; letter-spacing: 1px;
+  transition: all 0.07s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active { transform: translateY(6px); box-shadow: 0 2px 0 #0b121c, 0 8px 16px #00000060; }
+.btn.power-on {
+  background: linear-gradient(145deg, #1e5b3c, #123d28);
+  border: 1px solid #37a06a; color: #d6ffe6;
+  box-shadow: 0 8px 0 #0c2419, 0 12px 20px #00000060;
+}
+.btn.power-off {
+  background: linear-gradient(145deg, #6e2b2b, #471d1d);
+  border: 1px solid #b34747; color: #ffd9d9;
+  box-shadow: 0 8px 0 #2b1010, 0 12px 20px #00000060;
+}
+.btn:disabled {
+  opacity: 0.45; transform: translateY(4px);
+  box-shadow: 0 4px 0 #0b121c, 0 8px 12px #00000040;
+  pointer-events: none;
+}
+
+.footer {
+  font-size: 0.72rem; text-align: center;
+  margin-top: 12px; color: #55759b;
+}
+
+/* ===== 仪表盘 ===== */
+.gauge-row {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  gap: 4px;
+}
+.gauge-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+.gauge-label {
+  font-size: 0.7rem;
+  color: #7a9cc0;
+  margin-top: 2px;
+  letter-spacing: 0.5px;
+}
+
+/* ===== 摇摆范围（只有摇头开启时才出现，0° = 等同关闭）===== */
+.range-row {
+  margin-top: 8px;
+  padding: 10px 12px 4px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid #223247;
+  border-radius: 14px;
+}
+.range-row.hide { display: none; }
+.range-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.66rem;
+  color: #5f7d9e;
+  margin-top: 2px;
+  padding: 0 2px;
+}
+#oscSpanSlider { height: 6px; }
+#oscSpanSlider::-webkit-slider-thumb { width: 20px; height: 20px; }
+#oscSpanSlider::-moz-range-thumb { width: 20px; height: 20px; }
+
+/* ===== 手机适配：排版收紧 + 关掉背景粒子特效（省电、滑动更跟手）===== */
+@media (max-width: 480px) {
+  body { padding: 10px 10px 24px; }
+  .fan-card { padding: 16px 12px 18px; border-radius: 24px; }
+  .fan-title { font-size: 1.12rem; margin-bottom: 8px; }
+  .fan-title span { font-size: 1.3rem; }
+  .blades-container { width: 176px; height: 176px; }
+  .status-value { font-size: 1.3rem; min-width: 56px; }
+  .section { padding: 10px 12px; border-radius: 16px; margin-bottom: 8px; }
+  .section-title { font-size: 0.74rem; margin-bottom: 6px; }
+  .option-label { font-size: 0.86rem; }
+  .option-label small { font-size: 0.64rem; }
+  .switch { width: 44px; height: 25px; }
+  .switch::after { width: 19px; height: 19px; top: 2px; left: 2px; }
+  .switch.on::after { left: 21px; }
+  .gauge-item canvas { max-width: 96px; height: auto; }
+  .btn { padding: 11px 0; font-size: 1rem; }
+  .preset-btn, .timer-btn { font-size: 0.78rem; }
+  #particleCanvas { display: none; }
+}
+
+</style>
+</head>
+<body>
+
+<canvas id="particleCanvas"></canvas>
+
+<div class="fan-card" id="fanCard">
+
+  <div class="fan-title">
+    <span>🌀</span> 电风扇 <span>🌀</span>
+  </div>
+
+  <div class="led-bar">
+    <div class="led-item"><div class="led" id="ledPower"></div>电源</div>
+    <div class="led-item"><div class="led" id="ledWind"></div>自然风</div>
+    <div class="led-item"><div class="led" id="ledOsc"></div>摇头</div>
+    <div class="led-item"><div class="led" id="ledHeat"></div>热源追踪</div>
+    <div class="led-item"><div class="led" id="ledCam"></div>摄像头</div>
+  </div>
+
+  <div class="fan-visual">
+    <div class="blades-container" id="bladesContainer">
+      <div class="blades" id="fanBlades">
+        <div class="blade"></div>
+        <div class="blade"></div>
+        <div class="blade"></div>
+      </div>
+      <div class="center-hub"></div>
+      <div class="camera-scan" id="cameraScan"></div>
+    </div>
+    <!-- 红点放在 blades-container 外侧：那里有 trackSwing 动画（±12° 摆动），
+         放里面的话就算数据不动，点也会被容器带着晃 -->
+    <div class="heat-marker" id="heatMarker"></div>
+  </div>
+
+  <div class="fan-status">
+    <div class="status-label"><i>⚡</i> 状态</div>
+    <div class="status-value" id="statusDisplay">OFF</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><i>⚙️</i> 风速调节</div>
+    <div class="speed-control">
+      <div class="slider-label">
+        <span>手动风速</span>
+        <span id="speedPercent">0%</span>
+      </div>
+      <input type="range" id="speedSlider" min="0" max="100" value="0" step="1">
+    </div>
+    <div class="preset-row">
+      <button class="preset-btn" data-speed="0">关闭<span class="pct">0%</span></button>
+      <button class="preset-btn" data-speed="30">睡眠<span class="pct">30%</span></button>
+      <button class="preset-btn" data-speed="60">舒适<span class="pct">60%</span></button>
+      <button class="preset-btn" data-speed="100">强劲<span class="pct">100%</span></button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><i>🔧</i> 功能选项</div>
+    <div class="option-row">
+      <div class="option-label">
+        自然风模式
+        <small>风速自动起伏，模拟自然风</small>
+      </div>
+      <div class="switch" id="switchNature"></div>
+    </div>
+    <div class="option-row">
+      <div class="option-label">
+        左右摇头
+        <small>风扇整体来回摆动</small>
+      </div>
+      <div class="switch" id="switchOsc"></div>
+    </div>
+    <!-- 摇摆范围：只在摇头开启时出现；拖到 0° 就等于关掉摇头 -->
+    <div class="range-row hide" id="oscRangeRow">
+      <div class="slider-label">
+        <span>摇摆范围</span>
+        <span id="oscSpanText">110°</span>
+      </div>
+      <input type="range" id="oscSpanSlider" min="0" max="180" step="5" value="110">
+      <div class="range-scale"><span>0°（关）</span><span>90°</span><span>180°</span></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><i>🎯</i> 智能感知模式</div>
+    <div class="option-row">
+      <div class="option-label">
+        🔥 自动跟踪热源
+        <small>红外阵列检测热源并自动摆向热源位置</small>
+      </div>
+      <div class="switch red" id="switchHeat"></div>
+    </div>
+    <div class="option-row">
+      <div class="option-label">
+        📷 摄像头识别
+        <small>视觉识别人员位置，智能送风</small>
+      </div>
+      <div class="switch purple" id="switchCam"></div>
+    </div>
+    <div class="mode-hint" id="modeHint">
+      可单独开启热源追踪或摄像头识别，也可以同时开启协同工作。
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title"><i>⏱</i> 定时关机</div>
+    <div class="timer-row">
+      <button class="timer-btn active" data-min="0">关</button>
+      <button class="timer-btn" data-min="30">30分</button>
+      <button class="timer-btn" data-min="60">1小时</button>
+      <button class="timer-btn" data-min="120">2小时</button>
+      <button class="timer-btn" data-min="240">4小时</button>
+    </div>
+    <div class="timer-info" id="timerInfo"></div>
+  </div>
+
+  <!-- ===== 系统状态仪表盘 ===== -->
+  <div class="section">
+    <div class="section-title"><i>📊</i> 系统状态</div>
+    <div class="gauge-row">
+      <div class="gauge-item">
+        <canvas id="gaugeTemp" width="120" height="80"></canvas>
+        <div class="gauge-label">芯片温度</div>
+      </div>
+      <div class="gauge-item">
+        <canvas id="gaugeHeap" width="120" height="80"></canvas>
+        <div class="gauge-label">空闲内存</div>
+      </div>
+      <div class="gauge-item">
+        <canvas id="gaugeUptime" width="120" height="80"></canvas>
+        <div class="gauge-label">运行时间</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="button-group">
+    <button class="btn power-on" id="onBtn" disabled>⏻ 开</button>
+    <button class="btn power-off" id="offBtn">⏻ 关</button>
+  </div>
+
+  <div class="footer">ESP32-S3 · 智能电风扇</div>
+</div>
+
+<script>
+/* =========================================================
+   一、背景粒子与风线系统
+   ========================================================= */
+(function() {
+  const canvas = document.getElementById('particleCanvas');
+  const ctx = canvas.getContext('2d');
+  let w = canvas.width = window.innerWidth;
+  let h = canvas.height = window.innerHeight;
+
+  /* 窄屏（手机）不画背景粒子：200 个粒子 + 90 条风线每帧重算，
+     中低端机上会明显掉帧、还费电。CSS 那边也把 canvas 隐藏了。 */
+  const LITE = window.matchMedia('(max-width: 640px)').matches;
+  if (LITE) canvas.style.display = 'none';
+
+  const PARTICLE_COUNT = 200;
+  const LINE_COUNT = 90;
+
+  const fanCenter = { x: w / 2, y: h / 2, radius: 120 };
+
+  const fanLink = { power: false, speed: 0, effectiveSpeed: 0 };
+  let fanLinkEnabled = false;
+
+  window.__fanLink = fanLink;
+  window.__fanCenter = fanCenter;
+
+  function isOutOfBounds(x, y, margin) {
+    margin = margin || 40;
+    return x < -margin || x > w + margin || y < -margin || y > h + margin;
+  }
+
+  class Particle {
+    constructor() { this.resetUniform(); }
+    resetUniform() {
+      this.x = Math.random() * w;
+      this.y = Math.random() * h;
+      this.r = Math.random() * 1.6 + 0.3;
+      this.speedX = (Math.random() - 0.5) * 0.35;
+      this.speedY = (Math.random() - 0.5) * 0.35;
+      this.alpha = Math.random() * 0.35 + 0.12;
+      this.hue = 200 + Math.random() * 40;
+    }
+    resetFromFan() {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = fanCenter.radius * (0.6 + Math.random() * 0.8);
+      this.x = fanCenter.x + Math.cos(angle) * dist;
+      this.y = fanCenter.y + Math.sin(angle) * dist;
+      this.r = Math.random() * 1.6 + 0.3;
+      this.speedX = Math.cos(angle) * 0.6;
+      this.speedY = Math.sin(angle) * 0.6;
+      this.alpha = Math.random() * 0.35 + 0.12;
+      this.hue = 200 + Math.random() * 40;
+    }
+    draw() {
+      if (fanLinkEnabled && fanLink.power && fanLink.effectiveSpeed > 5) {
+        const glow = Math.min(1, fanLink.effectiveSpeed / 100);
+        ctx.shadowBlur = 6 + glow * 10;
+        ctx.shadowColor = `hsla(${this.hue}, 100%, 75%, ${this.alpha + 0.15})`;
+      } else {
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = 'transparent';
+      }
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${this.hue}, 85%, 85%, ${this.alpha})`;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    update() {
+      if (fanLinkEnabled && fanLink.power && fanLink.effectiveSpeed > 0) {
+        const dx = this.x - fanCenter.x;
+        const dy = this.y - fanCenter.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.001;
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const power = (fanLink.effectiveSpeed / 100) * 3.2;
+        this.speedX += nx * power * 0.18;
+        this.speedY += ny * power * 0.18;
+        this.speedX += (Math.random() - 0.5) * 0.25;
+        this.speedY += (Math.random() - 0.5) * 0.25;
+        this.speedX *= 0.985;
+        this.speedY *= 0.985;
+        if (isOutOfBounds(this.x, this.y, 30)) { this.resetFromFan(); return; }
+        if (dist > Math.max(w, h) * 0.7) { this.resetFromFan(); return; }
+        this.x += this.speedX;
+        this.y += this.speedY;
+      } else {
+        this.speedX += (Math.random() - 0.5) * 0.02;
+        this.speedY += (Math.random() - 0.5) * 0.02;
+        this.speedX *= 0.995;
+        this.speedY *= 0.995;
+        const maxV = 0.6;
+        if (Math.abs(this.speedX) > maxV) this.speedX = Math.sign(this.speedX) * maxV;
+        if (Math.abs(this.speedY) > maxV) this.speedY = Math.sign(this.speedY) * maxV;
+        this.x += this.speedX;
+        this.y += this.speedY;
+        if (this.x < -10) this.x = w + 10;
+        if (this.x > w + 10) this.x = -10;
+        if (this.y < -10) this.y = h + 10;
+        if (this.y > h + 10) this.y = -10;
+      }
+    }
+  }
+
+  class WindLine {
+    constructor() { this.reset(); }
+    reset() {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = fanCenter.radius * (0.4 + Math.random() * 0.6);
+      this.x = fanCenter.x + Math.cos(angle) * dist;
+      this.y = fanCenter.y + Math.sin(angle) * dist;
+      const spread = 0.6;
+      this.dirX = Math.cos(angle + (Math.random() - 0.5) * spread);
+      this.dirY = Math.sin(angle + (Math.random() - 0.5) * spread);
+      this.baseSpeed = 0.8 + Math.random() * 1.2;
+      this.length = 4 + Math.random() * 14;
+      this.alpha = 0.1 + Math.random() * 0.35;
+      this.hue = 200 + Math.random() * 30;
+      this.life = 0;
+      this.maxLife = 100 + Math.random() * 120;
+    }
+    draw() {
+      if (!fanLinkEnabled || !fanLink.power || fanLink.effectiveSpeed < 1) return;
+      const speedFactor = Math.min(1, fanLink.effectiveSpeed / 100);
+      const dynamicAlpha = this.alpha * (0.5 + speedFactor * 0.8);
+      ctx.save();
+      ctx.beginPath();
+      const startX = this.x, startY = this.y;
+      const endX = this.x + this.dirX * this.length * (0.6 + speedFactor * 0.8);
+      const endY = this.y + this.dirY * this.length * (0.6 + speedFactor * 0.8);
+      ctx.lineWidth = 0.6 + speedFactor * 1.2;
+      const gradient = ctx.createLinearGradient(startX, startY, endX, endY);
+      gradient.addColorStop(0, `hsla(${this.hue}, 90%, 75%, ${dynamicAlpha * 0.9})`);
+      gradient.addColorStop(0.6, `hsla(${this.hue}, 90%, 80%, ${dynamicAlpha * 0.5})`);
+      gradient.addColorStop(1, `hsla(${this.hue}, 90%, 85%, 0)`);
+      ctx.strokeStyle = gradient;
+      ctx.lineCap = 'round';
+      if (fanLink.effectiveSpeed > 40) {
+        ctx.shadowBlur = 5 + speedFactor * 10;
+        ctx.shadowColor = `hsla(${this.hue}, 100%, 75%, ${dynamicAlpha * 0.5})`;
+      }
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+      ctx.restore();
+    }
+    update() {
+      if (!fanLinkEnabled || !fanLink.power || fanLink.effectiveSpeed < 0.5) {
+        if (Math.random() < 0.02) this.reset();
+        return;
+      }
+      const speedFactor = Math.min(1.2, fanLink.effectiveSpeed / 80);
+      const moveSpeed = this.baseSpeed * (0.8 + speedFactor * 1.5);
+      this.x += this.dirX * moveSpeed;
+      this.y += this.dirY * moveSpeed;
+      this.dirX += (Math.random() - 0.5) * 0.04 * speedFactor;
+      this.dirY += (Math.random() - 0.5) * 0.04 * speedFactor;
+      const len = Math.sqrt(this.dirX * this.dirX + this.dirY * this.dirY);
+      if (len > 0.01) { this.dirX /= len; this.dirY /= len; }
+      this.life++;
+      if (isOutOfBounds(this.x, this.y, 80) || this.life > this.maxLife) {
+        this.reset();
+        return;
+      }
+      const distToCenter = Math.hypot(this.x - fanCenter.x, this.y - fanCenter.y);
+      if (distToCenter > Math.max(w, h) * 0.65) this.reset();
+    }
+  }
+
+  const particles = [];
+  for (let i = 0; i < PARTICLE_COUNT; i++) particles.push(new Particle());
+  const windLines = [];
+  for (let i = 0; i < LINE_COUNT; i++) windLines.push(new WindLine());
+
+  let lastPowerState = false;
+  function handlePowerTransition() {
+    if (!fanLinkEnabled) { lastPowerState = fanLink.power; return; }
+    const power = fanLink.power;
+    if (power === lastPowerState) return;
+    if (!power) {
+      particles.forEach(p => {
+        if (isOutOfBounds(p.x, p.y, 20)) p.resetUniform();
+        else { p.speedX *= 0.5; p.speedY *= 0.5; }
+      });
+    } else {
+      particles.forEach((p, i) => { if (i % 5 < 3) p.resetFromFan(); });
+      windLines.forEach(line => line.reset());
+    }
+    lastPowerState = power;
+  }
+
+  function animate() {
+    handlePowerTransition();
+    ctx.clearRect(0, 0, w, h);
+    if (fanLinkEnabled && fanLink.power && fanLink.effectiveSpeed > 0) {
+      const glowR = fanCenter.radius * (1.1 + fanLink.effectiveSpeed / 200);
+      const g = ctx.createRadialGradient(fanCenter.x, fanCenter.y, 0, fanCenter.x, fanCenter.y, glowR);
+      const intensity = Math.min(0.35, 0.08 + (fanLink.effectiveSpeed / 100) * 0.25);
+      g.addColorStop(0, `rgba(120, 200, 255, ${intensity})`);
+      g.addColorStop(1, 'rgba(120, 200, 255, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(fanCenter.x, fanCenter.y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    windLines.forEach(line => { line.update(); line.draw(); });
+    particles.forEach(p => { p.update(); p.draw(); });
+    requestAnimationFrame(animate);
+  }
+  if (!LITE) requestAnimationFrame(animate);
+
+  window.addEventListener('resize', () => {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+    particles.forEach(p => { if (isOutOfBounds(p.x, p.y, 20)) p.resetUniform(); });
+    windLines.forEach(line => { if (isOutOfBounds(line.x, line.y, 60)) line.reset(); });
+  });
+
+  window.__updateFanCenter = function(x, y, radius) {
+    fanCenter.x = x; fanCenter.y = y; fanCenter.radius = radius;
+  };
+  window.__enableFanLink = function() {
+    if (fanLinkEnabled) return;
+    particles.forEach(p => {
+      if (isOutOfBounds(p.x, p.y, 20)) p.resetUniform();
+      else { p.speedX *= 0.6; p.speedY *= 0.6; }
+    });
+    windLines.forEach(line => line.reset());
+    fanLinkEnabled = true;
+    lastPowerState = fanLink.power;
+  };
+  window.__resetParticles = function() {
+    particles.forEach(p => { if (isOutOfBounds(p.x, p.y, 20)) p.resetUniform(); });
+    windLines.forEach(line => line.reset());
+  };
+})();
+
+
+/* =========================================================
+   二、风扇控制主逻辑
+   ========================================================= */
+(function() {
+  const fanState = {
+    power: false,
+    speed: 0,
+    nature: false,
+    oscillate: false,
+    oscSpan: 110,       /* 摇摆幅度（左右合计 0..180°），0 = 不扫 */
+    trackHeat: false,
+    camera: false,
+    timerEnd: 0,
+  };
+
+  let currentRotation = 0;
+  let rotationSpeed = 0;
+  let animationFrame = null;
+  let lastTimestamp = 0;
+  let naturePhase = 0;
+  let effectiveSpeed = 0;
+
+  let heatTimer = null;
+  let camTimer = null;
+  let camTargetX = 50;
+  let heatSmooth = null;      /* 红点位置的 EMA 状态：null = 下一帧直接落位 */
+  let timerInterval = null;
+  let timerSetMin    = 0;      /* 定时按键选的分钟数：固件只认相对分钟（timerMin）*/
+  let speedSendTimer = null;   /* 滑杆防抖：拖一次只发最后那下，别把 /post 刷爆 */
+  let lastLocalEditMs = 0;     /* 最近一次本地下发的时刻，后台同步据此避让 */
+  let lastOscSpan = 110;       /* 上次的摇摆幅度：摇头关掉再打开时恢复它 */
+  let spanDragging = false;    /* 正在拖幅度滑杆：拖动期间不被后台同步改回去 */
+
+  const fanLink = window.__fanLink;
+  const fanCenter = window.__fanCenter;
+
+  const fanCard         = document.getElementById('fanCard');
+  const fanBlades       = document.getElementById('fanBlades');
+  const bladesContainer = document.getElementById('bladesContainer');
+  const statusDisplay   = document.getElementById('statusDisplay');
+  const speedSlider     = document.getElementById('speedSlider');
+  const speedPercent    = document.getElementById('speedPercent');
+  const onBtn           = document.getElementById('onBtn');
+  const offBtn          = document.getElementById('offBtn');
+  const ledPower        = document.getElementById('ledPower');
+  const ledWind         = document.getElementById('ledWind');
+  const ledOsc          = document.getElementById('ledOsc');
+  const ledHeat         = document.getElementById('ledHeat');
+  const ledCam          = document.getElementById('ledCam');
+  const switchNature    = document.getElementById('switchNature');
+  const switchOsc       = document.getElementById('switchOsc');
+  const oscRangeRow     = document.getElementById('oscRangeRow');
+  const oscSpanSlider   = document.getElementById('oscSpanSlider');
+  const oscSpanText     = document.getElementById('oscSpanText');
+  const switchHeat      = document.getElementById('switchHeat');
+  const switchCam       = document.getElementById('switchCam');
+  const modeHint        = document.getElementById('modeHint');
+  const timerInfo       = document.getElementById('timerInfo');
+  const cameraScan      = document.getElementById('cameraScan');
+  const heatMarker      = document.getElementById('heatMarker');
+  const presetBtns      = document.querySelectorAll('.preset-btn');
+  const timerBtns       = document.querySelectorAll('.timer-btn');
+
+  function syncFanCenter() {
+    if (!window.__updateFanCenter) return;
+    const rect = bladesContainer.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const radius = rect.width / 2;
+    window.__updateFanCenter(cx, cy, radius);
+    if (fanLink) {
+      fanLink.power = fanState.power;
+      fanLink.speed = fanState.speed;
+      /* 关机时必须是 0：否则动画层会拿“记忆档位”当当前风速，
+         粒子/光圈就可能残留一点动静 */
+      fanLink.effectiveSpeed = fanState.power ? (effectiveSpeed || fanState.speed) : 0;
+    }
+  }
+
+  const INTRO_DURATION = 1650;
+  let introStart = performance.now();
+  let introSyncing = true;
+
+  function introSyncLoop() {
+    if (!introSyncing) return;
+    syncFanCenter();
+    if (performance.now() - introStart < INTRO_DURATION) {
+      requestAnimationFrame(introSyncLoop);
+    } else {
+      introSyncing = false;
+      syncFanCenter();
+      if (window.__enableFanLink) window.__enableFanLink();
+    }
+  }
+
+  fanCard.addEventListener('animationend', (e) => {
+    if (e.animationName === 'cardFloatUp') {
+      introSyncing = false;
+      syncFanCenter();
+      if (window.__enableFanLink) window.__enableFanLink();
+      requestAnimationFrame(() => {
+        syncFanCenter();
+        if (window.__resetParticles) window.__resetParticles();
+      });
+    }
+  });
+
+  requestAnimationFrame(() => {
+    introStart = performance.now();
+    introSyncLoop();
+  });
+
+  function updateUI() {
+    /* 关机时一律按 0% 画功率条：固件 /status 回的 speed 是“上次设定的档位”
+       （上电默认 40），直接拿来渲染就会出现「状态 OFF、功率条却在 40%」的错位。
+       档位本身不丢，仍在 fanState.speed 里，点开机时继续用它。 */
+    const shownSpeed = fanState.power ? fanState.speed : 0;
+    statusDisplay.textContent = fanState.power ? 'ON' : 'OFF';
+    speedPercent.textContent = `${shownSpeed}%`;
+    if (parseInt(speedSlider.value, 10) !== shownSpeed) speedSlider.value = shownSpeed;
+    onBtn.disabled  = fanState.power;
+    offBtn.disabled = !fanState.power;
+
+    ledPower.className = 'led' + (fanState.power ? ' on-green' : '');
+    ledWind.className  = 'led' + (fanState.power && fanState.nature ? ' on-blue' : '');
+    ledOsc.className   = 'led' + (fanState.power && fanState.oscillate ? ' on-blue' : '');
+    ledHeat.className  = 'led' + (fanState.power && fanState.trackHeat ? ' on-orange' : '') + (fanState.trackHeat ? ' blink' : '');
+    ledCam.className   = 'led' + (fanState.power && fanState.camera ? ' on-purple' : '') + (fanState.camera ? ' blink' : '');
+
+    switchNature.classList.toggle('on', fanState.nature);
+    switchOsc.classList.toggle('on', fanState.oscillate);
+    switchHeat.classList.toggle('on', fanState.trackHeat);
+    switchCam.classList.toggle('on', fanState.camera);
+
+    [switchNature, switchOsc, switchHeat, switchCam].forEach(sw => {
+      sw.classList.toggle('disabled', !fanState.power);
+    });
+
+    /* 摇摆范围那一栏：只在「开机 + 摇头开启」时露面，其余情况整行收起 */
+    oscRangeRow.classList.toggle('hide', !(fanState.power && fanState.oscillate));
+    if (!spanDragging) {
+      oscSpanSlider.value = fanState.oscSpan;
+      oscSpanText.textContent = `${fanState.oscSpan}°`;
+    }
+
+    presetBtns.forEach(btn => {
+      const s = parseInt(btn.dataset.speed, 10);
+      btn.classList.toggle('active', fanState.power && s === fanState.speed);
+      btn.disabled = !fanState.power && s !== 0;
+    });
+
+    timerBtns.forEach(btn => {
+      const m = parseInt(btn.dataset.min, 10);
+      const active = fanState.timerEnd > 0 && m > 0 ? btn.dataset.activeTimer === 'true' : (m === 0 && fanState.timerEnd === 0);
+      btn.classList.toggle('active', active);
+      btn.disabled = !fanState.power;
+    });
+
+    updateSwingAnimation();
+    cameraScan.classList.toggle('active', fanState.power && fanState.camera);
+    updateModeHint();
+
+    if (fanLink) {
+      fanLink.power = fanState.power;
+      fanLink.speed = fanState.speed;
+    }
+    syncFanCenter();
+  }
+
+  function updateSwingAnimation() {
+    bladesContainer.classList.remove('oscillating', 'tracking');
+    if (!fanState.power) return;
+    if (fanState.trackHeat) bladesContainer.classList.add('tracking');
+    else if (fanState.oscillate) bladesContainer.classList.add('oscillating');
+  }
+
+  function updateModeHint() {
+    if (!fanState.power) {
+      modeHint.className = 'mode-hint';
+      modeHint.innerHTML = '可单独开启热源追踪或摄像头识别，也可以同时开启协同工作。';
+      return;
+    }
+    const heat = fanState.trackHeat;
+    const cam  = fanState.camera;
+    if (heat && cam) {
+      modeHint.className = 'mode-hint success';
+      modeHint.innerHTML = `🔥📷 协同模式：热源定位 + 视觉识别，精准送风<small>摄像头识别人体位置，热源辅助校准，风机自动摆向目标。</small>`;
+    } else if (heat) {
+      modeHint.className = 'mode-hint warn';
+      modeHint.innerHTML = `🔥 热源追踪中<small>红外阵列检测热源方向，风机自动摆向热源位置。</small>`;
+    } else if (cam) {
+      modeHint.className = 'mode-hint success';
+      modeHint.innerHTML = `📷 摄像头识别中<small>视觉识别人员位置，智能送风。</small>`;
+    } else {
+      modeHint.className = 'mode-hint';
+      modeHint.innerHTML = '可单独开启热源追踪或摄像头识别，也可以同时开启协同工作。';
+    }
+  }
+
+  function calcRotationSpeed(speed) {
+    if (speed <= 0) return 0;
+    return 0.5 + (speed / 100) * 7.5;
+  }
+
+  function animateFan(timestamp) {
+    if (!fanState.power) { animationFrame = null; return; }
+    if (fanState.nature && fanState.power) {
+      naturePhase += 0.03;
+      const wave = (Math.sin(naturePhase) + 1) / 2;
+      effectiveSpeed = fanState.speed * (0.6 + 0.4 * wave);
+    } else {
+      effectiveSpeed = fanState.speed;
+    }
+    if (fanLink) {
+      fanLink.power = fanState.power;
+      fanLink.speed = fanState.speed;
+      fanLink.effectiveSpeed = effectiveSpeed;
+    }
+    rotationSpeed = calcRotationSpeed(effectiveSpeed);
+    if (rotationSpeed > 0) {
+      if (!lastTimestamp) {
+        lastTimestamp = timestamp;
+        animationFrame = requestAnimationFrame(animateFan);
+        return;
+      }
+      const deltaTime = Math.min(100, timestamp - lastTimestamp);
+      lastTimestamp = timestamp;
+      const frameFactor = deltaTime / 16.67;
+      let deltaAngle = rotationSpeed * frameFactor;
+      if (deltaAngle > 25) deltaAngle = 25;
+      currentRotation = (currentRotation + deltaAngle) % 360;
+      fanBlades.style.transform = `rotate(${currentRotation}deg)`;
+    }
+    animationFrame = requestAnimationFrame(animateFan);
+  }
+
+  function startAnimation() {
+    if (animationFrame) { cancelAnimationFrame(animationFrame); animationFrame = null; }
+    lastTimestamp = 0;
+    naturePhase = 0;
+    if (fanState.power) animationFrame = requestAnimationFrame(animateFan);
+  }
+
+  /* ===== 热源红点：坐标全部来自固件 /ir，本地不做任何随机游走 =====
+     /ir 每 400ms 读一次，字段都是整数（固件侧不做浮点格式化）：
+       p   有没有人（固件去抖后的结论）   hot 超阈值像素数
+       d   最大温升 ×10 (℃)               a   偏角 ×10 (°)
+       c   置信度 ×100 (%)                x,y 热点质心 千分比 0..1000
+     没有目标就把点藏起来 —— 以前那种“没人也乱飘”是随机模拟造成的。 */
+  function placeHeatMarker(nx, ny) {
+    const box  = bladesContainer.getBoundingClientRect();
+    const host = heatMarker.parentElement.getBoundingClientRect();
+    if (!box.width || !host.width) return;
+    /* 视场只占盘面中间 72%：四周留边，看起来像“在看风扇前方那块区域” */
+    const x = (box.left - host.left) + box.width  * (0.14 + nx * 0.72);
+    const y = (box.top  - host.top ) + box.height * (0.14 + ny * 0.72);
+    heatMarker.style.left = `${x.toFixed(1)}px`;
+    heatMarker.style.top  = `${y.toFixed(1)}px`;
+  }
+
+  function applyIrFrame(d) {
+    if (!d || !d.p) { heatMarker.classList.remove('active'); heatSmooth = null; return; }
+    const nx = Math.min(1, Math.max(0, (Number(d.x) || 0) / 1000));
+    const ny = Math.min(1, Math.max(0, (Number(d.y) || 0) / 1000));
+    /* 质心逐帧会有 1/8 视场的量化抖动，做一次 EMA 再上屏：
+       首次（或重新捕获目标）直接落位，之后半程跟随，看着稳但不拖沓 */
+    if (!heatSmooth) heatSmooth = { x: nx, y: ny };
+    else {
+      heatSmooth.x += (nx - heatSmooth.x) * 0.5;
+      heatSmooth.y += (ny - heatSmooth.y) * 0.5;
+    }
+    placeHeatMarker(heatSmooth.x, heatSmooth.y);
+    /* 温升越高点越大，只改大小不改位置 */
+    const k = Math.min(1, Math.max(0, (Number(d.d) || 0) / 100));
+    heatMarker.style.transform = `translate(-50%, -50%) scale(${(0.9 + k * 0.6).toFixed(2)})`;
+    heatMarker.classList.add('active');
+  }
+
+  function startHeatTracking() {
+    stopHeatTracking();
+    heatSmooth = null;
+    const tick = () => {
+      if (!fanState.power || !fanState.trackHeat) return;
+      fetch('/ir')
+        .then(res => (res.ok ? res.json() : Promise.reject(res.status)))
+        .then(applyIrFrame)
+        .catch(() => heatMarker.classList.remove('active'));  /* 老固件没有 /ir 就藏起来，不假装有数据 */
+    };
+    tick();
+    heatTimer = setInterval(tick, 400);
+  }
+
+  function stopHeatTracking() {
+    if (heatTimer) { clearInterval(heatTimer); heatTimer = null; }
+    heatMarker.classList.remove('active');
+  }
+
+  function startCameraRecognition() {
+    stopCameraRecognition();
+    camTimer = setInterval(() => {
+      if (!fanState.power || !fanState.camera) return;
+      camTargetX = 20 + Math.random() * 60;
+      /* 注意：不再拿摄像头目标去拖红点。红点只认固件 /ir 的红外数据，
+         摄像头这里只驱动扫描圈和风场，免得两个模拟源打架。 */
+    }, 3000);
+  }
+
+  function stopCameraRecognition() {
+    if (camTimer) { clearInterval(camTimer); camTimer = null; }
+  }
+
+  function syncPerceptionSimulation() {
+    if (fanState.power && fanState.trackHeat) startHeatTracking();
+    else stopHeatTracking();
+    if (fanState.power && fanState.camera) startCameraRecognition();
+    else stopCameraRecognition();
+  }
+
+  function setFanPower(power, keepSpeed) {
+    if (fanState.power === power) return;
+    fanState.power = power;
+    if (!power) {
+      fanState.speed = 0;
+      fanState.nature = false;
+      fanState.oscillate = false;
+      fanState.trackHeat = false;
+      fanState.camera = false;
+      fanState.timerEnd = 0;
+      timerSetMin = 0;
+      stopTimer();
+      stopHeatTracking();
+      stopCameraRecognition();
+      fanBlades.style.transform = 'rotate(0deg)';
+      currentRotation = 0;
+      if (animationFrame) { cancelAnimationFrame(animationFrame); animationFrame = null; }
+      timerInfo.textContent = '';
+      heatMarker.classList.remove('active');
+      cameraScan.classList.remove('active');
+      effectiveSpeed = 0;
+    } else {
+      if (!keepSpeed && fanState.speed === 0) fanState.speed = 30;
+      if (fanState.speed === 0) fanState.speed = 1;
+      effectiveSpeed = fanState.speed;
+      startAnimation();
+    }
+    syncPerceptionSimulation();
+    updateUI();
+    sendToESP32();
+  }
+
+  function setFanSpeed(speed) {
+    speed = Math.min(100, Math.max(0, speed));
+    if (!fanState.power) return;
+    fanState.speed = speed;
+    speedSlider.value = speed;
+    speedPercent.textContent = `${speed}%`;
+    if (!animationFrame) startAnimation();
+    updateUI();
+    queueSend(120);
+  }
+
+  function onSliderInput(e) {
+    const val = parseInt(e.target.value, 10);
+    speedPercent.textContent = `${val}%`;
+    if (!fanState.power) {
+      if (val > 0) { fanState.speed = val; setFanPower(true, true); }
+      else { speedSlider.value = 0; speedPercent.textContent = '0%'; }
+      return;
+    }
+    if (val === 0) setFanPower(false);
+    else setFanSpeed(val);
+  }
+
+  function onSliderChange(e) {
+    if (!fanState.power) { speedSlider.value = 0; speedPercent.textContent = '0%'; }
+    /* 松手就立刻落地，不等防抖那一档 */
+    if (speedSendTimer) { clearTimeout(speedSendTimer); speedSendTimer = null; sendToESP32(); }
+  }
+
+  function stopTimer() {
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  }
+
+  function startTimer(minutes) {
+    stopTimer();
+    timerSetMin = minutes;                 /* 发给固件的就是这个“原始分钟数” */
+    fanState.timerEnd = minutes > 0 ? Date.now() + minutes * 60 * 1000 : 0;
+    timerBtns.forEach(b => delete b.dataset.activeTimer);
+    if (minutes > 0) {
+      const targetBtn = [...timerBtns].find(b => parseInt(b.dataset.min, 10) === minutes);
+      if (targetBtn) targetBtn.dataset.activeTimer = 'true';
+    }
+    if (minutes > 0) {
+      timerInterval = setInterval(() => {
+        const remain = fanState.timerEnd - Date.now();
+        if (remain <= 0) {
+          stopTimer();
+          fanState.timerEnd = 0;
+          timerInfo.textContent = '定时结束，风扇已关闭';
+          setFanPower(false);
+          return;
+        }
+        const m = Math.floor(remain / 60000);
+        const s = Math.floor((remain % 60000) / 1000);
+        timerInfo.textContent = `⏳ 将在 ${m}分${s.toString().padStart(2,'0')}秒 后关机`;
+        updateUI();
+      }, 500);
+    } else {
+      timerInfo.textContent = '';
+    }
+    updateUI();
+  }
+
+  /* 拖滑杆时不要每一像素都发一次：最后一次改动后 120ms 再发，手感一样但不会打爆 */
+  function queueSend(delayMs) {
+    if (speedSendTimer) clearTimeout(speedSendTimer);
+    speedSendTimer = setTimeout(() => { speedSendTimer = null; sendToESP32(); }, delayMs);
+  }
+
+  function sendToESP32() {
+    lastLocalEditMs = Date.now();
+    const payload = {
+      power: fanState.power,
+      speed: fanState.speed,
+      nature: fanState.nature,
+      oscillate: fanState.oscillate,
+      oscSpan: fanState.oscSpan,
+      trackHeat: fanState.trackHeat,
+      camera: fanState.camera,
+      /* 固件只按“相对分钟”倒计时（millis 时间轴），不依赖 NTP。
+         早先发的是绝对时间戳 timerEnd，ESP32 没对时的话会算出一个天文数字的分钟数，
+         定时等于永远不到点——这是页面和固件对不上的地方。 */
+      timerMin: timerSetMin
+    };
+    fetch('/post', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => console.log('[后端已确认]', data))
+    .catch(err => console.error('[POST 失败]', err));
+  }
+
+  /* ===== 设备状态落地（首屏同步 + 之后每 2 秒的后台同步共用）=====
+     silent = true 时：用户刚点过的 1.2 秒内不覆盖，免得和手速抢；
+     同时负责“设备端自己变了”的跟随——最典型的是定时到点关机。 */
+  function applyDeviceState(data, silent) {
+    const devPower = !!data.power;
+
+    if (silent) {
+      if (Date.now() - lastLocalEditMs < 1200) return;
+      if (devPower !== fanState.power) {
+        console.log('[后台同步] 设备开关机变化 →', devPower);
+        fanState.power = devPower;
+        if (!devPower) {
+          stopTimer(); stopHeatTracking(); stopCameraRecognition();
+          fanState.speed = 0; fanState.nature = false; fanState.oscillate = false;
+          fanState.trackHeat = false; fanState.camera = false; fanState.timerEnd = 0;
+          timerSetMin = 0; effectiveSpeed = 0;
+          if (animationFrame) { cancelAnimationFrame(animationFrame); animationFrame = null; }
+          fanBlades.style.transform = 'rotate(0deg)';
+          currentRotation = 0;
+          timerInfo.textContent = '';
+        } else {
+          startAnimation();
+        }
+        syncPerceptionSimulation();
+      }
+    } else {
+      fanState.power = devPower;
+    }
+
+    fanState.speed     = data.speed;
+    fanState.nature    = !!data.nature;
+    fanState.oscillate = !!data.oscillate;
+    /* 摇摆幅度：老固件没有这个字段，保持原值即可 */
+    if (data.oscSpan !== undefined && data.oscSpan !== null) {
+      fanState.oscSpan = Math.min(180, Math.max(0, data.oscSpan | 0));
+      if (fanState.oscSpan > 0) lastOscSpan = fanState.oscSpan;
+    }
+    fanState.trackHeat = !!data.trackHeat;
+    fanState.camera    = !!data.camera;
+
+    /* 定时：固件 /status 回的是 timerMin（相对分钟），换算成本地倒计时显示。
+       页面刷新后原来会读到 undefined，定时状态直接丢掉。 */
+    if (data.timerMin !== undefined) {
+      timerSetMin = data.timerMin | 0;
+      if (timerSetMin > 0) {
+        if (!timerInterval) startTimer(timerSetMin);
+      } else if (timerInterval) {
+        stopTimer();
+        fanState.timerEnd = 0;
+        timerInfo.textContent = '';
+      }
+    }
+
+    if (fanState.power && !animationFrame) startAnimation();
+    syncPerceptionSimulation();
+    updateUI();
+  }
+
+  /* ===== 从后端同步状态（silent = true 由 2s 轮询调用）===== */
+  function syncStateFromBackend(silent) {
+    fetch('/status')
+      .then(res => res.json())
+      .then(data => {
+        if (!silent) console.log('[同步上次状态]', data);
+        applyDeviceState(data, !!silent);
+      })
+      .catch(err => { if (!silent) console.warn('[同步状态失败]', err); });
+  }
+
+  /* ===== 系统监控仪表盘 ===== */
+  function drawGauge(canvasId, value, max, unit, color) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    const cx = w / 2, cy = h * 0.9, r = 52;
+    ctx.clearRect(0, 0, w, h);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI, 0);
+    ctx.strokeStyle = '#1e2b3d';
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    const ratio = Math.min(value / max, 1);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI, Math.PI + Math.PI * ratio);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    ctx.fillStyle = '#eef2f5';
+    ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    let displayVal;
+    if (unit === 'KB') displayVal = (value / 1024).toFixed(1) + ' KB';
+    else if (unit === 's') {
+      if (value < 60) displayVal = value + 's';
+      else if (value < 3600) displayVal = (value / 60).toFixed(0) + 'm';
+      else displayVal = (value / 3600).toFixed(1) + 'h';
+    } else displayVal = value.toFixed(1) + unit;
+    ctx.fillText(displayVal, cx, cy - 10);
+  }
+
+  function fetchSystemStats() {
+    fetch('/stats')
+      .then(res => res.json())
+      .then(data => {
+        drawGauge('gaugeTemp', data.temp, 80, '°C', '#ff8c00');
+        /* 固件 /stats 那边字段是全小写的 freeheap，两种都认，不然表里是 NaN */
+        const freeHeap = (data.freeHeap !== undefined) ? data.freeHeap : data.freeheap;
+        const freeKB = (freeHeap || 0) / 1024;
+        const totalKB = (data.totalHeap || 0) / 1024;
+        drawGauge('gaugeHeap', freeKB, totalKB, 'KB', '#4dff9e');
+        const uptimeMax = Math.max(data.uptime, 3600);
+        drawGauge('gaugeUptime', data.uptime, uptimeMax, 's', '#5fc8ff');
+      })
+      .catch(err => console.warn('[stats 获取失败]', err));
+  }
+
+  /* ===== 事件绑定 ===== */
+  onBtn.addEventListener('click', () => setFanPower(true));
+  offBtn.addEventListener('click', () => setFanPower(false));
+  speedSlider.addEventListener('input', onSliderInput);
+  speedSlider.addEventListener('change', onSliderChange);
+
+  presetBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const s = parseInt(btn.dataset.speed, 10);
+      if (s === 0) { if (fanState.power) setFanPower(false); }
+      else {
+        if (!fanState.power) { fanState.speed = s; setFanPower(true, true); }
+        else setFanSpeed(s);
+      }
+    });
+  });
+
+  switchNature.addEventListener('click', () => {
+    if (!fanState.power) return;
+    fanState.nature = !fanState.nature;
+    naturePhase = 0;
+    updateUI();
+    sendToESP32();
+  });
+
+  switchOsc.addEventListener('click', () => {
+    if (!fanState.power) return;
+    fanState.oscillate = !fanState.oscillate;
+    /* 重新打开时如果幅度还停在 0，用上次的值恢复，别让它"打开了却不摆" */
+    if (fanState.oscillate && !fanState.oscSpan) fanState.oscSpan = lastOscSpan || 110;
+    updateUI();
+    sendToESP32();
+  });
+
+  /* 摇摆范围：拖动时只更新数字，松手才落地（拖到 0 等于关掉摇头） */
+  oscSpanSlider.addEventListener('input', (e) => {
+    spanDragging = true;
+    const val = parseInt(e.target.value, 10);
+    oscSpanText.textContent = `${val}°`;
+    if (val > 0) {
+      fanState.oscSpan = val;
+      lastOscSpan = val;
+      queueSend(180);          /* 边拖边让电机跟着换范围 */
+    }
+  });
+  oscSpanSlider.addEventListener('change', (e) => {
+    spanDragging = false;
+    const val = parseInt(e.target.value, 10);
+    if (val === 0) {
+      fanState.oscSpan = 0;
+      fanState.oscillate = false;
+    } else {
+      fanState.oscSpan = val;
+      lastOscSpan = val;
+      fanState.oscillate = true;
+    }
+    if (speedSendTimer) { clearTimeout(speedSendTimer); speedSendTimer = null; }
+    updateUI();
+    sendToESP32();
+  });
+
+  switchHeat.addEventListener('click', () => {
+    if (!fanState.power) return;
+    fanState.trackHeat = !fanState.trackHeat;
+    syncPerceptionSimulation();
+    updateUI();
+    sendToESP32();
+  });
+
+  switchCam.addEventListener('click', () => {
+    if (!fanState.power) return;
+    fanState.camera = !fanState.camera;
+    syncPerceptionSimulation();
+    updateUI();
+    sendToESP32();
+  });
+
+  timerBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!fanState.power) return;
+      const min = parseInt(btn.dataset.min, 10);
+      startTimer(min);
+      sendToESP32();
+    });
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (animationFrame) { cancelAnimationFrame(animationFrame); animationFrame = null; }
+    } else if (fanState.power) {
+      startAnimation();
+    }
+  });
+
+  /* ===== 初始化 ===== */
+  updateUI();
+  fanBlades.style.transform = 'rotate(0deg)';
+
+  window.addEventListener('resize', () => { syncFanCenter(); });
+  window.addEventListener('scroll', () => { syncFanCenter(); }, { passive: true });
+  setInterval(syncFanCenter, 500);
+
+  // 页面加载后同步状态 + 启动仪表盘轮询
+  syncStateFromBackend();
+  fetchSystemStats();
+  setInterval(fetchSystemStats, 5000);
+  /* 每 2 秒跟一次设备：设备端自己变了（定时关机、重启、另一台手机改过）页面能跟上，
+     不刷新也能看到真实状态 */
+  setInterval(() => syncStateFromBackend(true), 2000);
+
+  console.log('ESP32-S3 智能电风扇 · 流动之境 已就绪');
+})();
+</script>
+</body>
+</html>

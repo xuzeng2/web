@@ -1,0 +1,52 @@
+{
+  "_note": "数值与 fan_config.h 的默认值完全一致。删掉某一项 = 这一项用默认值；改哪项就只写哪项。JSON 不支持注释，说明统一写在 _note 里（_ 开头的键会被程序忽略）。",
+
+  "_note_user": "用户意图：这几个是立刻生效的，直接写进 g_cmd。",
+  "speed": 40,
+  "oscSpan": 110,
+  "heatOn": false,
+  "camOn": false,
+
+  "_note_wifi": "配网热点（手机连这个才能进配置页）。密码至少 8 位，短了自动退回默认值。",
+  "wifiSsid": "FanCtrl-Setup",
+  "wifiPass": "12345678",
+
+  "_note_ir": "红外/热源：温升阈值、确认帧数、对准死区等。",
+  "irDeltaC": 3.0,
+  "irFullC": 8.0,
+  "irMinHot": 3,
+  "irConfirmN": 2,
+  "irReleaseN": 3,
+  "irDeadbandDeg": 4.0,
+  "irAlignStepDeg": 30.0,
+  "irRealignDeg": 25.0,
+
+  "_note_model": "模型参数。irModelArenaKb 是编译期的（tensorArena 数组大小），写了也不生效，要改请改 fan_config.h 重烧。irModelVmax 必须大于 irModelVmin，否则两个都退回默认。",
+  "irModelConfMin": 0.5,
+  "irModelArenaKb": 32,
+  "irModelInferMs": 200,
+  "irModelVmax": 40.0,
+  "irModelVmin": 15.0,
+
+  "_note_step": "步进：扫描/对准转速（5~10 比较稳）、锁定多久断电、角度多久落一次 NVS。",
+  "stepScanRpm": 8,
+  "stepAimRpm": 5,
+  "stepReleaseMs": 8000,
+  "stepPosSaveMs": 300000,
+
+  "_note_fan": "风机：最低占空比、自然风周期与最低比例、软启动步进间隔。",
+  "fanMinDutyPct": 8,
+  "fanNaturePeriod": 6000,
+  "fanNatureLow": 0.55,
+  "fanSoftStepMs": 40,
+
+  "_note_sys": "系统/定时：各模块的节拍与超时。改小会更跟手但更费 CPU，改大会更省电但更迟钝。",
+  "statePeriodMs": 50,
+  "irPollMs": 110,
+  "irIdlePollMs": 1000,
+  "uiPeriodMs": 200,
+  "powerPeriodMs": 1000,
+  "targetLostMs": 1500,
+  "camOnlineMs": 5000,
+  "camFreshMs": 2500
+}
